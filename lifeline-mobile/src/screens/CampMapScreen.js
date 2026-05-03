@@ -11,18 +11,47 @@ import { Picker } from '@react-native-picker/picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 const PAGE_SIZE = 10;
+const NAME_PATTERN = /^[A-Za-z\s]+$/;
+const TEXT_WITHOUT_SYMBOLS_PATTERN = /^[A-Za-z0-9\s]+$/;
+
+const getToday = () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return today;
+};
+
+const getMaxCampDate = () => {
+    const maxDate = getToday();
+    maxDate.setDate(maxDate.getDate() + 7);
+    return maxDate;
+};
+
+const formatDateKey = (value) => {
+    const dateValue = new Date(value);
+    const year = dateValue.getFullYear();
+    const month = String(dateValue.getMonth() + 1).padStart(2, '0');
+    const day = String(dateValue.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const sanitizeName = (value) => value.replace(/[^A-Za-z\s]/g, '');
+const sanitizePlainText = (value) => value.replace(/[^A-Za-z0-9\s]/g, '');
+const toTimeKey = (value) => value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+const isGoogleMapsPlaceLink = (value) => {
+    if (!value) return true;
+    return /^https?:\/\/([a-z0-9-]+\.)?google\.com\/maps\/place\//i.test(value.trim());
+};
 
 export default function CampMapScreen({ navigation }) {
     const { isAdmin } = useAuth();
     const defaults = getDefaultLocationSelection();
     
-    // Core screen data and loading state.
     const [camps, setCamps] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchText, setSearchText] = useState('');
     const [interestSubmitting, setInterestSubmitting] = useState(false);
 
-    // Form state used for creating and editing camps.
+    // Form states
     const [showForm, setShowForm] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [name, setName] = useState('');
@@ -38,21 +67,19 @@ export default function CampMapScreen({ navigation }) {
     const [campStatus, setCampStatus] = useState('UPCOMING');
     const [saving, setSaving] = useState(false);
 
-    // Detail modal state and hospital options for the selected location.
+    // Modal view states
     const [selectedCamp, setSelectedCamp] = useState(null);
     const [hospitals, setHospitals] = useState([]);
 
-    // Date and time picker visibility flags.
+    // DateTimePicker visibility
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showStartTimePicker, setShowStartTimePicker] = useState(false);
     const [showEndTimePicker, setShowEndTimePicker] = useState(false);
 
-    // Recalculate district choices whenever the province changes.
     const districts = useMemo(() => getDistrictsByProvince(province), [province]);
 
     useEffect(() => {
         if (!province || !district) { setHospitals([]); return; }
-        // Load hospitals for the currently selected province and district.
         api.get('/api/hospitals', { params: { province, district } })
             .then(res => {
                 const list = (res.data || []).map(item => item.name);
@@ -68,7 +95,6 @@ export default function CampMapScreen({ navigation }) {
             });
     }, [province, district]);
 
-    // Fetch all camps shown on the main list.
     const fetchCamps = async () => {
         setLoading(true);
         try {
@@ -85,7 +111,6 @@ export default function CampMapScreen({ navigation }) {
         fetchCamps();
     }, []);
 
-    // Reset the form back to its default create state.
     const resetForm = () => {
         setName('');
         setProvince(defaults.province);
@@ -102,24 +127,41 @@ export default function CampMapScreen({ navigation }) {
         setShowForm(false);
     };
 
-    // Create a new camp or update the currently edited one.
     const handleSaveCamp = async () => {
         if (!name || !location || !date) {
             return Alert.alert('Missing Info', 'Please provide camp name, location and date.');
         }
+        if (!NAME_PATTERN.test(name.trim())) {
+            return Alert.alert('Invalid Camp Name', 'Camp name can contain only letters and spaces.');
+        }
+        if (!TEXT_WITHOUT_SYMBOLS_PATTERN.test(location.trim())) {
+            return Alert.alert('Invalid Location', 'Location can contain only letters, numbers, and spaces.');
+        }
+        if (address && !TEXT_WITHOUT_SYMBOLS_PATTERN.test(address.trim())) {
+            return Alert.alert('Invalid Address', 'Address can contain only letters, numbers, and spaces.');
+        }
+        if (!isGoogleMapsPlaceLink(googleMapLink.trim())) {
+            return Alert.alert('Invalid Google Maps Link', 'Please enter a Google Maps place link.');
+        }
+        if (date < getToday() || date > getMaxCampDate()) {
+            return Alert.alert('Invalid Date', 'Camp date must be within the next 7 days.');
+        }
+        if (toTimeKey(startTime) >= toTimeKey(endTime)) {
+            return Alert.alert('Invalid Time', 'Start time must be before end time.');
+        }
 
         setSaving(true);
         const payload = {
-            name,
+            name: name.trim(),
             province,
             district,
             nearestHospital,
-            location,
-            address,
-            googleMapLink,
-            date: date.toISOString().split('T')[0],
-            startTime: startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
-            endTime: endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
+            location: location.trim(),
+            address: address.trim(),
+            googleMapLink: googleMapLink.trim(),
+            date: formatDateKey(date),
+            startTime: toTimeKey(startTime),
+            endTime: toTimeKey(endTime),
             campStatus
         };
 
@@ -140,7 +182,6 @@ export default function CampMapScreen({ navigation }) {
         }
     };
 
-    // Populate the form with an existing camp for editing.
     const openEdit = (camp) => {
         setEditingId(camp.id || camp._id);
         setName(camp.name || '');
@@ -172,7 +213,6 @@ export default function CampMapScreen({ navigation }) {
         setShowForm(true);
     };
 
-    // Confirm and remove a camp from the backend.
     const handleDeleteCamp = (campId) => {
         Alert.alert('Delete camp?', 'This donation camp event will be permanently removed.', [
             { text: 'Cancel', style: 'cancel' },
@@ -187,7 +227,6 @@ export default function CampMapScreen({ navigation }) {
         ]);
     };
 
-    // Register the current user as interested in a camp.
     const handleInterest = async (campId) => {
         if (interestSubmitting) return;
         setInterestSubmitting(true);
@@ -202,7 +241,6 @@ export default function CampMapScreen({ navigation }) {
         }
     };
 
-    // Keep camps ordered by date and start time for a consistent list view.
     const sortedCamps = useMemo(() => {
         return [...camps].sort((a, b) => {
             const aDate = new Date(`${a.date}T${a.startTime || a.time || '00:00'}`).getTime();
@@ -211,7 +249,6 @@ export default function CampMapScreen({ navigation }) {
         });
     }, [camps]);
 
-    // Apply the search filter against key visible location fields.
     const filteredCamps = useMemo(() => {
         if (!searchText) return sortedCamps;
         const s = searchText.toLowerCase();
@@ -223,14 +260,12 @@ export default function CampMapScreen({ navigation }) {
         );
     }, [sortedCamps, searchText]);
 
-    // Return badge colors that match the current camp status.
     const getStatusStyles = (status) => {
         if (status === 'ONGOING') return { bg: '#DCFCE7', text: '#166534' };
         if (status === 'ENDED')   return { bg: '#F3F4F6', text: '#374151' };
         return { bg: '#FEE2E2', text: '#9F1239' };
     };
 
-    // Render a single camp summary card inside the list.
     const renderCampItem = ({ item: camp }) => {
         const sStyles = getStatusStyles(camp.campStatus);
         
@@ -325,7 +360,7 @@ export default function CampMapScreen({ navigation }) {
                 />
             )}
 
-            {/* Modal for admins to create a new camp or edit an existing one. */}
+            {/* CREATE / EDIT MODAL */}
             <Modal visible={showForm} animationType="slide" transparent={true} onRequestClose={resetForm}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.formContainer}>
@@ -338,7 +373,7 @@ export default function CampMapScreen({ navigation }) {
 
                         <ScrollView style={styles.formScroll}>
                             <Text style={styles.label}>Camp Name *</Text>
-                            <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Enter camp name" />
+                            <TextInput style={styles.input} value={name} onChangeText={(value) => setName(sanitizeName(value))} placeholder="Enter camp name" />
 
                             <View style={styles.row}>
                                 <View style={{ flex: 1, marginRight: 8 }}>
@@ -390,10 +425,10 @@ export default function CampMapScreen({ navigation }) {
                             </View>
 
                             <Text style={styles.label}>Location / Venue *</Text>
-                            <TextInput style={styles.input} value={location} onChangeText={setLocation} placeholder="Venue name" />
+                            <TextInput style={styles.input} value={location} onChangeText={(value) => setLocation(sanitizePlainText(value))} placeholder="Venue name" />
 
                             <Text style={styles.label}>Address</Text>
-                            <TextInput style={styles.input} value={address} onChangeText={setAddress} placeholder="Detailed address" multiline numberOfLines={2} />
+                            <TextInput style={styles.input} value={address} onChangeText={(value) => setAddress(sanitizePlainText(value))} placeholder="Detailed address" multiline numberOfLines={2} />
 
                             <Text style={styles.label}>Google Maps Link</Text>
                             <TextInput style={styles.input} value={googleMapLink} onChangeText={setGoogleMapLink} placeholder="https://maps.google.com/..." />
@@ -452,6 +487,8 @@ export default function CampMapScreen({ navigation }) {
                                         setShowDatePicker(false);
                                         if (selectedDate) setDate(selectedDate);
                                     }}
+                                    minimumDate={getToday()}
+                                    maximumDate={getMaxCampDate()}
                                 />
                             )}
                             {showStartTimePicker && (
@@ -496,7 +533,7 @@ export default function CampMapScreen({ navigation }) {
                 </View>
             </Modal>
 
-            {/* Read-only camp details modal with role-based actions. */}
+            {/* DETAILS MODAL */}
             <Modal visible={!!selectedCamp} animationType="fade" transparent={true} onRequestClose={() => setSelectedCamp(null)}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.detailsContainer}>
@@ -621,7 +658,6 @@ export default function CampMapScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-    // Main screen layout and list card styling.
     container: {
         flex: 1,
         backgroundColor: '#F0F4FF',
@@ -758,7 +794,7 @@ const styles = StyleSheet.create({
         color: '#E11D48',
         fontWeight: 'bold',
     },
-    // Shared modal and form presentation styles.
+    // Modal Styles
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0,0,0,0.5)',
@@ -861,7 +897,7 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontWeight: 'bold',
     },
-    // Detail modal content and action styles.
+    // Details Modal Styles
     detailsContainer: {
         backgroundColor: '#FFFFFF',
         borderRadius: 20,
