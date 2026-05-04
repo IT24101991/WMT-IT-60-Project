@@ -14,18 +14,21 @@ const PAGE_SIZE = 10;
 const NAME_PATTERN = /^[A-Za-z\s]+$/;
 const TEXT_WITHOUT_SYMBOLS_PATTERN = /^[A-Za-z0-9\s]+$/;
 
+// Normalizes "today" so date validation compares only calendar days.
 const getToday = () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return today;
 };
 
+// Camps are limited to the next 7 calendar days.
 const getMaxCampDate = () => {
     const maxDate = getToday();
     maxDate.setDate(maxDate.getDate() + 7);
     return maxDate;
 };
 
+// Stores the selected date in a backend-friendly YYYY-MM-DD format.
 const formatDateKey = (value) => {
     const dateValue = new Date(value);
     const year = dateValue.getFullYear();
@@ -37,6 +40,8 @@ const formatDateKey = (value) => {
 const sanitizeName = (value) => value.replace(/[^A-Za-z\s]/g, '');
 const sanitizePlainText = (value) => value.replace(/[^A-Za-z0-9\s]/g, '');
 const toTimeKey = (value) => value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+
+// Accept only direct Google Maps place URLs for consistent deep-link behavior.
 const isGoogleMapsPlaceLink = (value) => {
     if (!value) return true;
     return /^https?:\/\/([a-z0-9-]+\.)?google\.com\/maps\/place\//i.test(value.trim());
@@ -76,6 +81,7 @@ export default function CampMapScreen({ navigation }) {
     const [showStartTimePicker, setShowStartTimePicker] = useState(false);
     const [showEndTimePicker, setShowEndTimePicker] = useState(false);
 
+    // District choices depend on the currently selected province.
     const districts = useMemo(() => getDistrictsByProvince(province), [province]);
 
     useEffect(() => {
@@ -95,6 +101,7 @@ export default function CampMapScreen({ navigation }) {
             });
     }, [province, district]);
 
+    // Loads the current camp list used by both the map cards and detail modal.
     const fetchCamps = async () => {
         setLoading(true);
         try {
@@ -111,6 +118,7 @@ export default function CampMapScreen({ navigation }) {
         fetchCamps();
     }, []);
 
+    // Clears form state after saving or when the admin closes the modal.
     const resetForm = () => {
         setName('');
         setProvince(defaults.province);
@@ -127,6 +135,7 @@ export default function CampMapScreen({ navigation }) {
         setShowForm(false);
     };
 
+    // Validates user input and then creates or updates a camp record.
     const handleSaveCamp = async () => {
         if (!name || !location || !date) {
             return Alert.alert('Missing Info', 'Please provide camp name, location and date.');
@@ -182,6 +191,7 @@ export default function CampMapScreen({ navigation }) {
         }
     };
 
+    // Pre-fills the admin form from an existing camp before editing.
     const openEdit = (camp) => {
         setEditingId(camp.id || camp._id);
         setName(camp.name || '');
@@ -213,6 +223,7 @@ export default function CampMapScreen({ navigation }) {
         setShowForm(true);
     };
 
+    // Confirms before permanently removing a camp.
     const handleDeleteCamp = (campId) => {
         Alert.alert('Delete camp?', 'This donation camp event will be permanently removed.', [
             { text: 'Cancel', style: 'cancel' },
@@ -227,6 +238,7 @@ export default function CampMapScreen({ navigation }) {
         ]);
     };
 
+    // Lets a donor register interest from the camp detail modal.
     const handleInterest = async (campId) => {
         if (interestSubmitting) return;
         setInterestSubmitting(true);
@@ -241,6 +253,7 @@ export default function CampMapScreen({ navigation }) {
         }
     };
 
+    // Keeps camps ordered chronologically regardless of the API response order.
     const sortedCamps = useMemo(() => {
         return [...camps].sort((a, b) => {
             const aDate = new Date(`${a.date}T${a.startTime || a.time || '00:00'}`).getTime();
@@ -249,6 +262,7 @@ export default function CampMapScreen({ navigation }) {
         });
     }, [camps]);
 
+    // Filters the camp list by the user's search text across key location fields.
     const filteredCamps = useMemo(() => {
         if (!searchText) return sortedCamps;
         const s = searchText.toLowerCase();
@@ -260,12 +274,14 @@ export default function CampMapScreen({ navigation }) {
         );
     }, [sortedCamps, searchText]);
 
+    // Maps camp status values to their card badge colors.
     const getStatusStyles = (status) => {
         if (status === 'ONGOING') return { bg: '#DCFCE7', text: '#166534' };
         if (status === 'ENDED')   return { bg: '#F3F4F6', text: '#374151' };
         return { bg: '#FEE2E2', text: '#9F1239' };
     };
 
+    // Renders one camp card inside the main listing.
     const renderCampItem = ({ item: camp }) => {
         const sStyles = getStatusStyles(camp.campStatus);
         
